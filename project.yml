@@ -1,0 +1,36 @@
+name: CleanEject
+options:
+  bundleIdPrefix: com.redpikachu
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+targets:
+  CleanEject:
+    type: application
+    platform: macOS
+    sources:
+      - path: CleanEject/CleanEjectApp.swift
+      - path: CleanEject/AppIcon.icns
+        type: file
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.redpikachu.cleaneject
+        MARKETING_VERSION: "4.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: CleanEject/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CleanEject/CleanEject.entitlements
+        ARCHS: arm64
+        VALID_ARCHS: arm64
+        SWIFT_VERSION: "6.0"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        GENERATE_INFOPLIST_FILE: "NO"
+        COMBINE_HIDPI_IMAGES: "YES"
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/../Frameworks"
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+        ENABLE_HARDENED_RUNTIME: "YES"
