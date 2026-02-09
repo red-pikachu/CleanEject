@@ -331,27 +331,57 @@ final class VolumeManager {
     // MARK: Clean
 
     private func cleanVolumeInBackground(_ url: URL) async -> Int64 {
-        let junkNames = exactJunk
-        let prefix = junkPrefix
+        // Захватываем значения до Task.detached, чтобы не тянуть за собой self
+        let junkNames = Set(exactJunk)
         return await Task.detached(priority: .userInitiated) {
             var freed: Int64 = 0
             let fm = FileManager.default
+            let rootPath = url.path
 
-            for item in junkNames {
-                let fullURL = url.appendingPathComponent(item)
-                freed += itemSize(at: fullURL)
-                try? fm.removeItem(at: fullURL)
-            }
+            // Используем /usr/bin/find, чтобы надёжно собрать все пути:
+            // - файлы с префиксом "._*"
+            // - файлы/папки с именами из exactJunk (во всём дереве тома)
+            var patterns: [String] = ["._*"]
+            patterns.append(contentsOf: junkNames)
 
-            let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [])
-            while let fileURL = enumerator?.nextObject() as? URL {
-                let name = fileURL.lastPathComponent
-                if name.hasPrefix(prefix) {
-                    let size = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                    try? fm.removeItem(at: fileURL)
-                    freed += Int64(size)
+            let process = Process()
+            process.launchPath = "/usr/bin/find"
+            var args: [String] = [rootPath, "("]
+            for (idx, pat) in patterns.enumerated() {
+                args.append(contentsOf: ["-name", pat])
+                if idx != patterns.count - 1 {
+                    args.append("-o")
                 }
             }
+            args.append(")")
+            args.append("-print0")
+            process.arguments = args
+
+            let pipe = Pipe()
+            process.standardOutput = pipe
+
+            do {
+                try process.run()
+            } catch {
+                return 0
+            }
+            process.waitUntilExit()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            // Разбираем NUL-разделённый список путей
+            for pathData in data.split(separator: 0) {
+                let path = String(data: Data(pathData), encoding: .utf8) ?? ""
+                guard !path.isEmpty else { continue }
+                let fileURL = URL(fileURLWithPath: path)
+                let size = itemSize(at: fileURL)
+                do {
+                    try fm.removeItem(at: fileURL)
+                    freed += size
+                } catch {
+                    // Если не удалось удалить конкретный путь — просто идём дальше
+                }
+            }
+
             return freed
         }.value
     }
