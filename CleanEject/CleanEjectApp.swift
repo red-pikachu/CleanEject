@@ -410,12 +410,10 @@ private func itemSize(at url: URL) -> Int64 {
 private func performDeepScan(at url: URL) -> [VolumeManager.FileInfo] {
     let fm = FileManager.default
     let keys: [URLResourceKey] = [.fileSizeKey, .isDirectoryKey]
-    let startTime = Date()
     guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: keys, options: []) else { return [] }
     var topList: [(url: URL, size: Int64)] = []
     let skipDirs = [".Spotlight-V100", ".Trashes", ".fseventsd"]
     while let fileUrl = enumerator.nextObject() as? URL {
-        if Date().timeIntervalSince(startTime) > 20.0 { break }
         if skipDirs.contains(fileUrl.lastPathComponent) {
             enumerator.skipDescendants()
             continue
