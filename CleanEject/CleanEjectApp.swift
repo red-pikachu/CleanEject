@@ -286,12 +286,13 @@ final class VolumeManager {
             let task = Process()
             task.launchPath = "/usr/sbin/diskutil"
             task.arguments = ["unmountDisk", "force", url.path]
-            let pipe = Pipe()
-            task.standardOutput = pipe
-            task.standardError = pipe
-            try? task.run()
-            task.waitUntilExit()
-            return task.terminationStatus == 0
+            do {
+                try task.run()
+                task.waitUntilExit()
+                return task.terminationStatus == 0
+            } catch {
+                return false
+            }
         }.value
     }
 
@@ -305,9 +306,14 @@ final class VolumeManager {
             task.arguments = ["-t", "+D", path]
             let pipe = Pipe()
             task.standardOutput = pipe
-            try? task.run()
-            task.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let data: Data
+            do {
+                try task.run()
+                data = pipe.fileHandleForReading.readDataToEndOfFile()
+                task.waitUntilExit()
+            } catch {
+                return []
+            }
             guard let output = String(data: data, encoding: .utf8) else { return [String]() }
             let pids = output.split(separator: "\n").map { String($0) }
             var names: Set<String> = []
@@ -317,11 +323,15 @@ final class VolumeManager {
                 pt.arguments = ["-p", pid, "-o", "comm="]
                 let p = Pipe()
                 pt.standardOutput = p
-                try? pt.run()
-                pt.waitUntilExit()
-                let d = p.fileHandleForReading.readDataToEndOfFile()
-                if let n = String(data: d, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                    names.insert((n as NSString).lastPathComponent)
+                do {
+                    try pt.run()
+                    let d = p.fileHandleForReading.readDataToEndOfFile()
+                    pt.waitUntilExit()
+                    if let n = String(data: d, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                        names.insert((n as NSString).lastPathComponent)
+                    }
+                } catch {
+                    // Игнорируем ошибку для конкретного PID, продолжаем цикл
                 }
             }
             return Array(names).sorted()
@@ -365,9 +375,8 @@ final class VolumeManager {
             } catch {
                 return 0
             }
-            process.waitUntilExit()
-
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
             // Разбираем NUL-разделённый список путей
             for pathData in data.split(separator: 0) {
                 let path = String(data: Data(pathData), encoding: .utf8) ?? ""
