@@ -1,0 +1,27 @@
+name: Build and Verify
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build Application
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build CleanEject
+        run: |
+          xcodebuild -project CleanEject.xcodeproj -scheme CleanEject \
+            -configuration Release -arch arm64 build CODE_SIGNING_ALLOWED=NO
