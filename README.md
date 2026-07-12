@@ -1,11 +1,11 @@
-# CleanEject v4.0
+# CleanEject v5.0
 
 [![macOS](https://img.shields.io/badge/macOS-26.0%2B-blue.svg?style=flat-square)](https://developer.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg?style=flat-square)](https://developer.apple.com/swift/)
 [![Platform](https://img.shields.io/badge/Platform-Apple%20Silicon-lightgrey.svg?style=flat-square)](https://developer.apple.com/embed/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
-A native menu bar utility for macOS 26+ (Apple Silicon) designed to clean system clutter from external drives and safely eject them without leaving leftover junk files.
+A native menu bar utility for macOS 26+ (Apple Silicon) designed to clean system clutter from external drives, format them, and safely eject without leaving leftover junk files.
 
 ---
 
@@ -13,6 +13,7 @@ A native menu bar utility for macOS 26+ (Apple Silicon) designed to clean system
 
 - **🧹 Auto-Clean** — Automatically deletes macOS system junk (`.DS_Store`, `.Spotlight-V100`, `.Trashes`, `.fseventsd`, `.TemporaryItems`, `Thumbs.db`, and `._*` files) immediately before ejecting the drive.
 - **🔍 Busy Detector** — Detects which active processes are blocking disk ejection (via `lsof`), offering clear retry and force-eject options.
+- **💾 Disk Formatter** — Format external drives directly from the context menu (right-click). Supports **ExFAT**, **FAT32 (MS-DOS)**, **APFS**, and **Mac OS Extended (HFS+)** with custom volume naming. Features a native Liquid Glass confirmation dialog with real-time progress.
 - **📊 Space Analyzer** — Asynchronously scans the drive in the background to identify the **Top 5 largest files**, allowing you to instantly reveal and manage them in Finder.
 - **📈 Global Stats** — Tracks the total volume of junk cleaned over time, saved persistently across application relaunches.
 - **✨ Liquid Glass UI** — Premium, fully native glassmorphism design built using `GlassEffectContainer` and SwiftUI's custom `.glassEffect()` modifiers.
@@ -34,6 +35,7 @@ A native menu bar utility for macOS 26+ (Apple Silicon) designed to clean system
 ## 🏗 Building & Installation
 
 ### Option 1: Using the Command Line
+
 ```bash
 # Generate the Xcode project from project.yml (requires xcodegen)
 xcodegen generate
@@ -47,6 +49,7 @@ cp -R ~/Library/Developer/Xcode/DerivedData/CleanEject-*/Build/Products/Release/
 ```
 
 ### Option 2: Using Xcode
+
 1. Run `xcodegen generate` in the project root to generate the project files.
 2. Open `CleanEject.xcodeproj` in Xcode.
 3. Select **CleanEject** scheme, and choose **Product → Build** (or `Cmd + B`).
@@ -84,6 +87,7 @@ CleanEjectSwift/
 
 | Version | Description |
 |:---|:---|
+| **5.0** | Added native disk formatting (ExFAT, FAT32, APFS, HFS+) with Liquid Glass dialog, context menu integration, and real-time progress feedback. |
 | **4.0** | Modernized entry point with `@main`, enabled Hardened Runtime, optimized refresh rates, and cleaned up codebase. |
 | **3.1** | Introduced Busy Detector, Async Deep Scan, and Liquid Sounds. |
 | **3.0** | Integrated Space Analyzer, custom junk patterns, and global stats tracking. |

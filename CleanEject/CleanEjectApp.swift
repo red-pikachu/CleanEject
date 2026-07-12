@@ -50,7 +50,7 @@ final class VolumeManager {
         var topFiles: [FileInfo] = []
 
         enum Status: Equatable {
-            case idle, cleaning, ejecting, success, busy, ejected, error(String)
+            case idle, cleaning, ejecting, success, busy, ejected, formatting, error(String)
         }
 
         var usedPercent: Double {
@@ -279,6 +279,77 @@ final class VolumeManager {
         withAnimation { volumes[idx].status = .idle }
         volumes[idx].blockingProcesses = []
         eject(volumes[idx], force: true)
+    }
+
+    func format(_ volume: Volume, to formatType: String, newName: String) {
+        guard let index = volumes.firstIndex(where: { $0.id == volume.id }) else { return }
+        withAnimation { volumes[index].status = .formatting }
+
+        Task {
+            let url = volume.url
+            let volId = volume.id
+            let volName = volume.name
+            let sanitized = sanitizeVolumeName(newName, for: formatType)
+            
+            let success = await eraseVolumeInBackground(url, format: formatType, name: sanitized)
+            
+            if success {
+                withAnimation {
+                    if let idx = volumes.firstIndex(where: { $0.id == volId }) {
+                        volumes[idx].status = .success
+                    }
+                }
+                NSSound(named: "Glass")?.play()
+                Notifier.send(title: "Диск форматирован", body: "«\(volName)» успешно переформатирован в \(formatType).")
+                try? await Task.sleep(for: .seconds(1.2))
+                await refresh()
+            } else {
+                withAnimation {
+                    if let idx = volumes.firstIndex(where: { $0.id == volId }) {
+                        volumes[idx].status = .error("Не удалось форматировать")
+                    }
+                }
+                Notifier.send(
+                    title: "Ошибка форматирования",
+                    body: "Не удалось форматировать «\(volName)»."
+                )
+            }
+        }
+    }
+
+    private func sanitizeVolumeName(_ name: String, for format: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if format.uppercased() == "FAT32" || format.uppercased() == "MS-DOS" {
+            let allowed = CharacterSet.alphanumerics
+            let filtered = trimmed.uppercased().unicodeScalars.filter { allowed.contains($0) }
+            let result = String(filtered.map(Character.init))
+            return result.isEmpty ? "UNTITLED" : String(result.prefix(11))
+        } else if format.uppercased() == "EXFAT" {
+            let allowed = CharacterSet.alphanumerics.union(CharacterSet.whitespaces)
+            let filtered = trimmed.unicodeScalars.filter { allowed.contains($0) }
+            let result = String(filtered.map(Character.init))
+            return result.isEmpty ? "UNTITLED" : String(result.prefix(11))
+        } else {
+            let allowed = CharacterSet.alphanumerics.union(CharacterSet.whitespaces).union(CharacterSet(charactersIn: "-_"))
+            let filtered = trimmed.unicodeScalars.filter { allowed.contains($0) }
+            let result = String(filtered.map(Character.init))
+            return result.isEmpty ? "Untitled" : String(result.prefix(32))
+        }
+    }
+
+    private func eraseVolumeInBackground(_ url: URL, format: String, name: String) async -> Bool {
+        await Task.detached(priority: .userInitiated) {
+            let task = Process()
+            task.launchPath = "/usr/sbin/diskutil"
+            task.arguments = ["eraseVolume", format, name, url.path]
+            do {
+                try task.run()
+                task.waitUntilExit()
+                return task.terminationStatus == 0
+            } catch {
+                return false
+            }
+        }.value
     }
 
     private func forceUnmount(_ url: URL) async -> Bool {
@@ -540,7 +611,8 @@ struct MenuBarView: View {
                     onEject: { manager.eject(volume) },
                     onRetry: { manager.retry(volume) },
                     onForceEject: { manager.forceEject(volume) },
-                    onReveal: { manager.revealInFinder($0) }
+                    onReveal: { manager.revealInFinder($0) },
+                    onFormat: { FormatWindowPresenter.show(volume: volume, manager: manager) }
                 )
                 .glassEffectID(volume.id, in: glassNamespace)
             }
@@ -603,6 +675,7 @@ struct VolumeRow: View {
     let onRetry: () -> Void
     let onForceEject: () -> Void
     let onReveal: (URL) -> Void
+    let onFormat: () -> Void
 
     @State private var hover = false
     @State private var ejectHover = false
@@ -654,7 +727,48 @@ struct VolumeRow: View {
 
             Spacer()
 
-            actionButton
+            HStack(spacing: 6) {
+                if volume.status == .idle {
+                    Menu {
+                        Button {
+                            onOpen()
+                        } label: {
+                            Label("Открыть", systemImage: "folder")
+                        }
+                        
+                        Button {
+                            onReveal(volume.url)
+                        } label: {
+                            Label("Показать в Finder", systemImage: "sidebar.left")
+                        }
+                        
+                        Button {
+                            onFormat()
+                        } label: {
+                            Label("Форматировать...", systemImage: "eraser.fill")
+                        }
+                        
+                        Divider()
+                        
+                        Button {
+                            onForceEject()
+                        } label: {
+                            Label("Извлечь принудительно", systemImage: "exclamationmark.triangle")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(Color.primary.opacity(0.06)))
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                }
+
+                actionButton
+            }
         }
         .padding(12)
         .glassEffect(.regular, in: .rect(cornerRadius: 16, style: .continuous))
@@ -692,6 +806,10 @@ struct VolumeRow: View {
                     .foregroundStyle(Color.appAccent)
                     .buttonStyle(.plain)
             }
+        } else if volume.status == .formatting {
+            Text("Форматирование...")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.orange)
         } else {
             ProgressView(value: volume.usedPercent)
                 .tint(volume.usedPercent > 0.8 ? .orange : Color.appAccent)
@@ -725,7 +843,7 @@ struct VolumeRow: View {
             Image(systemName: "eject.fill")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(ejectHover ? Color.appAccent : .secondary)
-        case .cleaning, .ejecting:
+        case .cleaning, .ejecting, .formatting:
             ProgressView()
                 .controlSize(.small)
                 .tint(.orange)
@@ -830,6 +948,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         app.run()
     }
 
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         Notifier.requestPermission()
 
@@ -914,5 +1036,161 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+}
+
+// MARK: - Format Dialog (Liquid Glass Popup)
+
+struct FormatDialogView: View {
+    let volume: VolumeManager.Volume
+    let onFormat: (String, String) -> Void
+    let onCancel: () -> Void
+    
+    @State private var name: String
+    @State private var format: String = "ExFAT"
+    @State private var isHoveringCancel = false
+    @State private var isHoveringFormat = false
+
+    init(volume: VolumeManager.Volume, onFormat: @escaping (String, String) -> Void, onCancel: @escaping () -> Void) {
+        self.volume = volume
+        self.onFormat = onFormat
+        self.onCancel = onCancel
+        _name = State(initialValue: volume.name.uppercased())
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.red)
+                
+                Text("Форматирование")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.primary)
+                
+                Text("Все данные на диске «\(volume.name)» будут удалены.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+            .padding(.horizontal, 4)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Имя диска")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                
+                TextField("", text: $name)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.primary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+            }
+            
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Формат")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                
+                Picker("", selection: $format) {
+                    Text("ExFAT").tag("ExFAT")
+                    Text("MS-DOS (FAT32)").tag("FAT32")
+                    Text("APFS").tag("APFS")
+                    Text("Mac OS Extended (JHFS+)").tag("JHFS+")
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .tint(Color.appAccent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            
+            HStack(spacing: 12) {
+                Button(action: onCancel) {
+                    Text("Отмена")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 10, style: .continuous))
+                .onHover { isHoveringCancel = $0 }
+                
+                Button {
+                    onFormat(format, name)
+                } label: {
+                    Text("Стереть")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 32)
+                        .background(isHoveringFormat ? Color.red.opacity(0.9) : Color.red.opacity(0.75))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .onHover { isHoveringFormat = $0 }
+            }
+            .padding(.top, 4)
+        }
+        .padding(20)
+        .frame(width: 290, height: 340)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20, style: .continuous))
+    }
+}
+
+// MARK: - Format Window Presenter
+
+final class CustomFormatWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+@MainActor
+final class FormatWindowPresenter {
+    private static var sharedWindow: CustomFormatWindow?
+
+    static func show(volume: VolumeManager.Volume, manager: VolumeManager) {
+        if let window = sharedWindow {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        
+        let contentView = FormatDialogView(volume: volume) { format, name in
+            manager.format(volume, to: format, newName: name)
+            closeWindow()
+        } onCancel: {
+            closeWindow()
+        }
+        
+        let window = CustomFormatWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 290, height: 340),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.center()
+        window.contentView = NSHostingView(rootView: contentView)
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.hasShadow = true
+        window.isMovableByWindowBackground = true
+        window.level = .modalPanel
+        
+        self.sharedWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    static func closeWindow() {
+        sharedWindow?.orderOut(nil)
+        sharedWindow = nil
     }
 }
